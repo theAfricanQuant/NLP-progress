@@ -39,9 +39,7 @@ def sanitize_subdataset_name(name:str):
     """
 
     name = name.replace("**", "")
-    if name.endswith(":"):
-        name = name[:-1]
-
+    name = name.removesuffix(":")
     return name.strip()
 
 
@@ -64,9 +62,7 @@ def extract_lines_before_tables(lines:List[str]):
             in_table = True
         elif in_table and not l.startswith("|"):
             in_table = False
-            before = None
-            if l.strip() != "":
-                before = l.strip()
+            before = l.strip() if l.strip() != "" else None
         elif l.strip() != "":
             before = l.strip()
 
@@ -99,12 +95,13 @@ def handle_multiple_sota_table_exceptions(section:List[str], sota_tables:List[Li
         print("ERROR parsing the subdataset SOTA tables", file=sys.stderr)
         print(sota_tables, file=sys.stderr)
     else:
-        for i in range(len(subdatasets)):
-            out.append({
+        out.extend(
+            {
                 "subdataset": subdatasets[i],
-                "sota": extract_sota_table(sota_tables[i])
-            })
-
+                "sota": extract_sota_table(sota_tables[i]),
+            }
+            for i in range(len(subdatasets))
+        )
     return out
 
 
@@ -153,7 +150,9 @@ def extract_paper_title_and_link(paper_md:str) -> Tuple:
     md_links = re.findall("\\[.*\\]\\(.*\\)", paper_md)
 
     if len(md_links) > 1:
-        print("WARNING: Found multiple paper references: `%s`, using only the first..." % paper_md)
+        print(
+            f"WARNING: Found multiple paper references: `{paper_md}`, using only the first..."
+        )
     if len(md_links) == 0:
         return None, None
 
@@ -192,8 +191,6 @@ def extract_sota_table(table_lines:List[str]) -> Dict:
     :return:
     """
 
-    sota = {}
-
     header = table_lines[0]
     header_cols = [h.strip() for h in header.split("|") if h.strip()]
     cols_sanitized = [h.lower() for h in header_cols]
@@ -216,19 +213,13 @@ def extract_sota_table(table_lines:List[str]) -> Dict:
         print("".join(table_lines), file=sys.stderr)
         return {}
 
-    if "code" in cols_sanitized:
-        code_inx = cols_sanitized.index("code")
-    else:
-        code_inx = None
-
-    metrics_inx = set(range(len(header_cols))) - set([model_inx, paper_inx, code_inx])
+    code_inx = cols_sanitized.index("code") if "code" in cols_sanitized else None
+    metrics_inx = set(range(len(header_cols))) - {model_inx, paper_inx, code_inx}
     metrics_inx = sorted(list(metrics_inx))
 
     metrics_names = [header_cols[i] for i in metrics_inx]
 
-    sota["metrics"] = metrics_names
-    sota["rows"] = []
-
+    sota = {"metrics": metrics_names, "rows": []}
     min_cols = len(header_cols)
 
     # now parse the table rows
@@ -237,14 +228,16 @@ def extract_sota_table(table_lines:List[str]) -> Dict:
         row_cols = [h.strip() for h in row.split("|")][1:]
 
         if len(row_cols) < min_cols:
-            print("This row doesn't have enough columns, skipping: %s" % row, file=sys.stderr)
+            print(
+                f"This row doesn't have enough columns, skipping: {row}",
+                file=sys.stderr,
+            )
             continue
 
-        # extract all the metrics
-        metrics = {}
-        for i in range(len(metrics_inx)):
-            metrics[metrics_names[i]] = row_cols[metrics_inx[i]]
-
+        metrics = {
+            metrics_names[i]: row_cols[metrics_inx[i]]
+            for i in range(len(metrics_inx))
+        }
         # extract paper references
         paper_title, paper_link = extract_paper_title_and_link(row_cols[paper_inx])
 
@@ -343,9 +336,7 @@ def parse_markdown_file(md_file:str) -> List:
         if line.startswith("#"):
             if cur:
                 sections.append(cur)
-                cur = [line]
-            else:
-                cur = [line]
+            cur = [line]
         else:
             cur.append(line)
 
@@ -402,20 +393,19 @@ def parse_markdown_file(md_file:str) -> List:
                 print("ERROR: Unexpected dataset without a parent task at %s:#%d" %
                       (md_file, get_line_no(sections, section_index)), file=sys.stderr)
 
+            # new dataset and add
+            ds = {}
             if st is not None:
                 # we are in a subtask, add everything here
                 if "datasets" not in st:
                     st["datasets"] = []
 
-                # new dataset and add
-                ds = {}
                 st["datasets"].append(ds)
             else:
                 # we are in a task, add here
                 if "datasets" not in t:
                     t["datasets"] = []
 
-                ds = {}
                 t["datasets"].append(ds)
 
             ds["dataset"] = header[3:].strip()
@@ -423,9 +413,7 @@ def parse_markdown_file(md_file:str) -> List:
             desc, tables = extract_dataset_desc_and_sota_table(section[1:])
             ds["description"] = "".join(desc).strip()
 
-            # see if there is an arxiv link in the first paragraph of the description
-            dataset_links = extract_dataset_desc_links(desc)
-            if dataset_links:
+            if dataset_links := extract_dataset_desc_links(desc):
                 ds["dataset_links"] = dataset_links
 
             if tables:
@@ -456,7 +444,7 @@ def parse_markdown_directory(path:str):
 
     out = []
     for md_file in md_files:
-        print("Processing `%s`..." % md_file)
+        print(f"Processing `{md_file}`...")
         out.extend(parse_markdown_file(os.path.join(path, md_file)))
 
     return out
